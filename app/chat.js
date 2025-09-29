@@ -152,8 +152,8 @@ export default function ChatScreen() {
 const BG = '#F7F7FA';
 const CARD = '#FFFFFF';
 const BORDER = '#E6E7EC';
-const BOT = '#f4d1f8ff';
-const USER = '#e4b3f0ff';
+const BOT = '#CBA4F8';
+const USER = '#c093f3ff';
 const TEXT_MAIN = '#0E0F12';
 const TEXT_SUB = '#5E6472';
 const SHADOW = 'rgba(0,0,0,0.08)';

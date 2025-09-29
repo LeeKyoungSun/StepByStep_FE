@@ -1,4 +1,5 @@
-// app/login.js  (또는 screens/LoginScreen.js)
+// app/login.js
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -18,20 +19,30 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
 
   const onLogin = async () => {
-    if (!email.trim() || !pw) return Alert.alert('로그인', '이메일과 비밀번호를 입력하세요.');
+    if (!email.trim() || !pw) {
+      return Alert.alert('로그인', '이메일과 비밀번호를 입력하세요.');
+    }
     try {
       setLoading(true);
       const res = await fetch(`${process.env.EXPO_PUBLIC_API}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // LoginRequestDto 기준
         body: JSON.stringify({ email, password: pw }),
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
         throw new Error(e.message || '로그인에 실패했습니다.');
       }
-      // const { accessToken, refreshToken } = await res.json();
-      // TODO: 토큰 저장 (SecureStore 등), 사용자 정보 로드
+
+      // TokenDto 응답 구조 { accessToken, refreshToken }
+      const { accessToken, refreshToken } = await res.json();
+
+      // 토큰 저장 (AsyncStorage 사용 예시)
+      await AsyncStorage.setItem('accessToken', accessToken);
+      await AsyncStorage.setItem('refreshToken', refreshToken);
+
+      // 로그인 성공 후 홈 화면 이동
       router.replace('/home');
     } catch (err) {
       Alert.alert('로그인 실패', err.message);
@@ -46,7 +57,7 @@ export default function LoginScreen() {
         {/* 헤더: 캐릭터 + 제목 */}
         <View style={S.header}>
           <Image
-            source={require('../image/img/scsc1.png')}
+            source={require('../image/img/bot.png')}
             style={S.logo}
             resizeMode="contain"
           />
@@ -104,11 +115,11 @@ const S = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 24,
     alignItems: 'center',
-    justifyContent: 'center',  // 중앙 정렬
-    gap: 16,                  
+    justifyContent: 'center',
+    gap: 16,
   },
-  header: { alignItems: 'center', gap: 8 }, 
-  logo: { width: 200, height: 200, marginBottom: -40 }, 
+  header: { alignItems: 'center', gap: 8 },
+  logo: { width: 200, height: 200, marginBottom: -40 },
   title: { fontFamily: 'PretendardBold', fontSize: 28, textAlign: 'center' },
   subtitle: {
     fontFamily: 'PretendardMedium',
@@ -116,7 +127,7 @@ const S = StyleSheet.create({
     color: '#6b7280',
     textAlign: 'center',
   },
-  form: { marginTop: 20, width: '100%', gap: 12 },  // 폼도 여백 균형 맞춤
+  form: { marginTop: 20, width: '100%', gap: 12 },
   input: {
     borderWidth: 1,
     borderColor: '#e5e7eb',
