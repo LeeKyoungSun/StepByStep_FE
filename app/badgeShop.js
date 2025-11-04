@@ -1,78 +1,173 @@
+// app/badgeShop.js
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-    Animated,
-    FlatList,
-    Modal,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  Animated,
+  FlatList,
+  Modal,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
-// 더미 배지 24종
-const BADGES = [
-  { id: 'ally',        name: '안전한 대화가',   emoji: '👩‍🔬', cost: 90 },
-  { id: 'listener',    name: '경청 챔피언',     emoji: '👂',  cost: 110 },
-  { id: 'communicator',name: '의사소통 마스터', emoji: '💬',  cost: 140 },
-  { id: 'empathy',     name: '공감 전문가',     emoji: '🤝',  cost: 150 },
-  { id: 'respect',     name: '존중 수호자',     emoji: '🫡',  cost: 120 },
+const API = process.env.EXPO_PUBLIC_API;
 
-  { id: 'guardian',    name: '건강 수호자',     emoji: '🛡️', cost: 150 },
-  { id: 'safety',      name: '안전 지킴이',     emoji: '🧯',  cost: 130 },
-  { id: 'wellness',    name: '웰니스 메이커',   emoji: '🧘',  cost: 120 },
-  { id: 'help-seeker', name: '도움요청 용기',   emoji: '🆘',  cost: 100 },
-  { id: 'myth-buster', name: '괴담 파괴자',     emoji: '🔍',  cost: 140 },
+/** ---------- 공통 fetch 유틸 (JWT 자동 부착 + 래퍼 파싱) ---------- */
+async function authHeaders() {
+  const at = await AsyncStorage.getItem('accessToken');
+  return at ? { Authorization: `Bearer ${at}` } : {};
+}
+async function fetchJSON(path, { method = 'GET', body, headers } = {}) {
+  const url = `${API}${path.startsWith('/') ? '' : '/'}${path}`;
+  const res = await fetch(url, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(await authHeaders()),
+      ...(headers || {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
 
-  { id: 'fairness',    name: '성평등 지킴이',   emoji: '⚖️',  cost: 120 },
-  { id: 'allyship',    name: '차별 반대 연대',   emoji: '🕊️',  cost: 130 },
-  { id: 'consent',     name: '동의 존중러',     emoji: '✅',  cost: 110 },
-  { id: 'privacy',     name: '사생활 수호자',   emoji: '🔒',  cost: 130 },
+  // text / json 모두 안전 파싱
+  let json = null;
+  try { json = await res.json(); } catch { /* noop */ }
 
-  { id: 'explorer2',   name: '탐험가 Lv.2',     emoji: '🧭',  cost: 120 },
-  { id: 'explorer3',   name: '탐험가 Lv.3',     emoji: '🧭',  cost: 200 },
-  { id: 'explorer4',   name: '탐험가 Lv.4',     emoji: '🧭',  cost: 260 },
-  { id: 'explorer5',   name: '탐험가 Lv.5',     emoji: '🧭',  cost: 320 },
+  // 공통 래퍼 대응
+  const status = json?.status;
+  const data = json?.data ?? json;
 
-  { id: 'helper',      name: '커뮤니티 도우미', emoji: '🧩',  cost: 100 },
-  { id: 'writer',      name: '지식 나눔러',     emoji: '✍️',  cost: 110 },
-  { id: 'moderate',    name: '깨끗한 게시판',   emoji: '🧼',  cost: 140 },
-
-  { id: 'streak3',     name: '3일 연속 학습',   emoji: '📅',  cost: 90 },
-  { id: 'streak7',     name: '7일 연속 학습',   emoji: '📆',  cost: 150 },
-  { id: 'streak30',    name: '30일 꾸준함',     emoji: '🏆',  cost: 300 },
-];
+  if (!res.ok || status === 'error') {
+    const msg = json?.message || data?.message || `요청 실패 (HTTP ${res.status})`;
+    const err = new Error(msg);
+    err.status = res.status;
+    err.payload = json;
+    throw err;
+  }
+  return data ?? {};
+}
 
 export default function BadgeShopScreen() {
-  const [myPoints, setMyPoints] = useState(500);
-  const [owned, setOwned] = useState({});
+  const [catalog, setCatalog] = useState([]);   // [{id,name,emoji,description,price,owned?}]
+  const [owned, setOwned] = useState({});       // { [id]: true }
+  const [myPoints, setMyPoints] = useState(0);
+
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   // 포인트 펄스 애니메이션
   const scaleAnim = useRef(new Animated.Value(1)).current;
-  const startAnim = () => {
+  const pulse = () => {
     Animated.sequence([
       Animated.timing(scaleAnim, { toValue: 1.08, duration: 120, useNativeDriver: true }),
-      Animated.timing(scaleAnim, { toValue: 1.0,  duration: 120, useNativeDriver: true }),
+      Animated.timing(scaleAnim, { toValue: 1, duration: 120, useNativeDriver: true }),
     ]).start();
   };
 
-  const openConfirm = (item) => {
-    setSelected(item);
+  /** ---------- 초기 데이터 로드 ----------
+   * GET /api/points/me  -> { points }
+   * GET /api/badges     -> [{ id,name,emoji,description,price, owned? }]
+   */
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        const [pointsRes, badgesRes] = await Promise.all([
+          fetchJSON('/api/points/me').catch(() => ({ points: 0 })),
+          fetchJSON('/api/badges').catch(() => []),
+        ]);
+
+        const points = Number(pointsRes?.points ?? 0);
+        setMyPoints(Number.isFinite(points) ? points : 0);
+
+        const list = Array.isArray(badgesRes) ? badgesRes : [];
+        const normalized = list.map((b, i) => ({
+          id: b.id ?? b.badgeId ?? String(i),
+          name: b.name,
+          emoji: b.emoji,
+          description: b.description ?? '',
+          price: b.price ?? b.cost ?? 0,
+          owned: !!b.owned,
+        }));
+        setCatalog(normalized);
+
+        // 서버가 owned를 내려주면 반영
+        const map = {};
+        normalized.forEach((b) => { if (b.owned) map[b.id] = true; });
+        setOwned(map);
+      } catch (e) {
+        if (e.status === 401) {
+          // 비로그인: 카탈로그만 표시는 됨(구매 시 로그인 유도)
+          return;
+        }
+        Alert.alert('불러오기 실패', e.message || '배지 정보를 불러오지 못했어요.');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const openConfirm = (badge) => {
+    setSelected(badge);
     setConfirmOpen(true);
   };
 
-  const onConfirmBuy = () => {
+  /** ---------- 구매 ----------
+   * POST /api/badges/{badgeId}/purchase
+   * 성공 시 data 안에 { points, ownedIds? } 또는 { badgeId } 등을 가정하고 동기화
+   */
+  const onConfirmBuy = async () => {
     if (!selected) return;
-    if (owned[selected.id]) { setConfirmOpen(false); return; }
-    if (myPoints < selected.cost) { setConfirmOpen(false); return; }
+    const badgeId = selected.id;
+    const price = selected.price ?? selected.cost ?? 0;
 
-    setMyPoints((p) => p - selected.cost);
-    setOwned((o) => ({ ...o, [selected.id]: true }));
+    if (owned[badgeId]) { setConfirmOpen(false); return; }
+    if (myPoints < price) {
+      setConfirmOpen(false);
+      return Alert.alert('포인트 부족', '포인트가 부족해요.');
+    }
+
+    // 낙관적 반영
     setConfirmOpen(false);
-    startAnim();
+    const prevPoints = myPoints;
+    const prevOwned = { ...owned };
+    setMyPoints((p) => p - price);
+    setOwned((o) => ({ ...o, [badgeId]: true }));
+    pulse();
+
+    try {
+      const res = await fetchJSON(`/api/badges/${encodeURIComponent(badgeId)}/purchase`, {
+        method: 'POST',
+      });
+
+      // 서버값으로 동기화 (있을 때만)
+      const nextPoints = Number(res?.points ?? res?.user?.points ?? res?.wallet?.points ?? myPoints);
+      if (Number.isFinite(nextPoints)) setMyPoints(nextPoints);
+
+      const ownedList = res?.ownedIds ?? res?.badgesOwned ?? res?.badges;
+      if (Array.isArray(ownedList)) {
+        const map = {};
+        ownedList.forEach((id) => { map[id] = true; });
+        setOwned(map);
+      }
+    } catch (e) {
+      // 롤백
+      setMyPoints(prevPoints);
+      setOwned(prevOwned);
+
+      if (e.status === 401) {
+        return Alert.alert('로그인이 필요해요', '로그인 후 배지를 구매할 수 있어요.', [
+          { text: '로그인으로 이동', onPress: () => router.push('/login') },
+          { text: '닫기' },
+        ]);
+      }
+      Alert.alert('구매 실패', e.message || '배지 구매 중 오류가 발생했어요.');
+    }
   };
 
   const renderItem = ({ item }) => {
@@ -90,14 +185,13 @@ export default function BadgeShopScreen() {
         ) : (
           <View style={styles.pricePill}>
             <Text style={styles.coinDot}>●</Text>
-            <Text style={styles.priceText}>{item.cost} P</Text>
+            <Text style={styles.priceText}>{(item.price ?? item.cost ?? 0)} P</Text>
           </View>
         )}
       </TouchableOpacity>
     );
   };
 
-  // ⬇️ 헤더를 리스트의 헤더로 넣어서 전체 스크롤 가능 + sticky 고정
   const Header = (
     <View style={styles.header}>
       <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.8}>
@@ -105,7 +199,7 @@ export default function BadgeShopScreen() {
       </TouchableOpacity>
       <Animated.View style={[styles.pointsWrap, { transform: [{ scale: scaleAnim }] }]}>
         <Text style={styles.pointsCoin}>●</Text>
-        <Text style={styles.pointsText}>{myPoints.toLocaleString()} P</Text>
+        <Text style={styles.pointsText}>{loading ? '로딩…' : `${myPoints.toLocaleString()} P`}</Text>
       </Animated.View>
     </View>
   );
@@ -113,13 +207,12 @@ export default function BadgeShopScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <FlatList
-        data={BADGES}
-        keyExtractor={(it) => it.id}
+        data={catalog}
+        keyExtractor={(it) => String(it.id)}
         renderItem={renderItem}
         numColumns={2}
-        // 🔸 헤더/푸터 & 스크롤 설정
         ListHeaderComponent={Header}
-        stickyHeaderIndices={[0]}   // 헤더 고정 (원하면 이 줄 삭제)
+        stickyHeaderIndices={[0]}
         ListFooterComponent={<View style={{ height: 24 }} />}
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16, gap: 12 }}
         columnWrapperStyle={{ gap: 12 }}
@@ -127,19 +220,17 @@ export default function BadgeShopScreen() {
       />
 
       {/* 구매 모달 */}
-      <Modal
-        visible={confirmOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setConfirmOpen(false)}
-      >
+      <Modal visible={confirmOpen} transparent animationType="fade" onRequestClose={() => setConfirmOpen(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>배지 구매</Text>
             <Text style={styles.modalBadgeName}>{selected?.emoji} {selected?.name}</Text>
+            {!!selected?.description && (
+              <Text style={{ color: '#6b7280', marginTop: 6 }}>{selected.description}</Text>
+            )}
             <View style={[styles.pricePill, { marginTop: 8 }]}>
               <Text style={styles.coinDot}>●</Text>
-              <Text style={styles.priceText}>{selected?.cost} P</Text>
+              <Text style={styles.priceText}>{(selected?.price ?? selected?.cost ?? 0)} P</Text>
             </View>
 
             <View style={styles.modalActions}>
@@ -157,12 +248,12 @@ export default function BadgeShopScreen() {
   );
 }
 
+/* ---------------- styles ---------------- */
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#ffffff' },
 
-  // 헤더(리스트 헤더)
   header: {
-    backgroundColor: '#fff',        // sticky일 때 비침 방지
+    backgroundColor: '#fff',
     paddingTop: 12, paddingBottom: 12,
     paddingHorizontal: 0,
     flexDirection: 'row', alignItems: 'center', gap: 12,
@@ -181,7 +272,6 @@ const styles = StyleSheet.create({
   pointsCoin: { fontSize: 10, color: '#FFD54A' },
   pointsText: { fontWeight: '800', color: '#ffffff' },
 
-  // 카드
   card: {
     flex: 1,
     backgroundColor: '#f8fafc',
@@ -196,7 +286,6 @@ const styles = StyleSheet.create({
   cardEmoji: { fontSize: 32, marginBottom: 8 },
   cardTitle: { fontWeight: '700', fontSize: 14, color: '#111827', textAlign: 'center' },
 
-  // 가격/보유 pill
   pricePill: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 10, height: 26, borderRadius: 999,
@@ -210,7 +299,6 @@ const styles = StyleSheet.create({
   },
   ownedText: { color: '#374151', fontWeight: '700' },
 
-  // 모달
   modalBackdrop: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.35)',
     alignItems: 'center', justifyContent: 'center', padding: 20,

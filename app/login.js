@@ -12,40 +12,81 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { authApi } from '../lib/apiClient.js';
+import { useAuth } from '../lib/auth-context.js';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // ✅ useAuth가 없더라도 절대 크래시하지 않도록 가드
+  const authCtx = (typeof useAuth === 'function' ? useAuth() : null);
+  const setTokens = authCtx?.setTokens ?? (async () => {});
+
   const onLogin = async () => {
+    if (!authApi || typeof authApi.login !== 'function') {
+      return Alert.alert('로그인 실패', 'API 클라이언트를 불러오지 못했습니다. (authApi)');
+    }
     if (!email.trim() || !pw) {
       return Alert.alert('로그인', '이메일과 비밀번호를 입력하세요.');
     }
+
     try {
       setLoading(true);
-      const res = await fetch(`${process.env.EXPO_PUBLIC_API}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // LoginRequestDto 기준
-        body: JSON.stringify({ email, password: pw }),
+
+      // 서버 규약: POST /api/auth/login
+      const res = await authApi.login({ email, password: pw });
+
+      // 다양한 응답 키 대응
+      const accessToken =
+        res?.accessToken ?? res?.access_token ?? res?.token ?? res?.data?.accessToken ?? null;
+      const refreshToken =
+        res?.refreshToken ?? res?.refresh_token ?? res?.data?.refreshToken ?? null;
+
+      const accessExpSec =
+        res?.accessTokenExpiresIn ?? res?.access_expires_in ?? res?.expires_in;
+      const refreshExpSec =
+        res?.refreshTokenExpiresIn ?? res?.refresh_expires_in;
+
+      const nickname =
+        res?.nickname ?? res?.data?.nickname ?? res?.user?.nickname ?? res?.profile?.nickname ?? null;
+      const userId =
+        res?.userId ?? res?.data?.userId ?? res?.user?.id ?? res?.profile?.id ?? null;
+
+      if (!accessToken) throw new Error('토큰 발급에 실패했습니다.');
+
+      const user = {
+        ...(res?.user || res?.profile || {}),
+        ...(nickname ? { nickname } : {}),
+        ...(userId ? { id: userId } : {}),
+      };
+
+      const accessTokenExpiresAt =
+        typeof accessExpSec === 'number' ? Date.now() + accessExpSec * 1000 : undefined;
+      const refreshTokenExpiresAt =
+        typeof refreshExpSec === 'number' ? Date.now() + refreshExpSec * 1000 : undefined;
+
+      // 로컬 저장(다른 화면에서 바로 사용)
+      await AsyncStorage.multiSet([
+        ['accessToken', accessToken],
+        ['refreshToken', refreshToken ?? ''],
+        ...(nickname ? [['user_nickname', String(nickname)]] : []),
+        ...(userId ? [['x_user_id', String(userId)]] : []),
+      ]);
+
+      // 컨텍스트 저장(있을 때만)
+      await setTokens({
+        accessToken,
+        refreshToken,
+        user,
+        accessTokenExpiresAt,
+        refreshTokenExpiresAt,
       });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error(e.message || '로그인에 실패했습니다.');
-      }
 
-      // TokenDto 응답 구조 { accessToken, refreshToken }
-      const { accessToken, refreshToken } = await res.json();
-
-      // 토큰 저장 (AsyncStorage 사용 예시)
-      await AsyncStorage.setItem('accessToken', accessToken);
-      await AsyncStorage.setItem('refreshToken', refreshToken);
-
-      // 로그인 성공 후 홈 화면 이동
       router.replace('/home');
     } catch (err) {
-      Alert.alert('로그인 실패', err.message);
+      Alert.alert('로그인 실패', err?.message || '로그인에 실패했습니다.');
     } finally {
       setLoading(false);
     }
@@ -54,17 +95,11 @@ export default function LoginScreen() {
   return (
     <SafeAreaView style={S.safe}>
       <View style={S.wrap}>
-        {/* 헤더: 캐릭터 + 제목 */}
         <View style={S.header}>
-          <Image
-            source={require('../image/img/bot.png')}
-            style={S.logo}
-            resizeMode="contain"
-          />
+          <Image source={require('../image/img/bot.png')} style={S.logo} resizeMode="contain" />
           <Text style={S.title}>로그인</Text>
         </View>
 
-        {/* 폼 */}
         <View style={S.form}>
           <TextInput
             style={S.input}
@@ -81,18 +116,11 @@ export default function LoginScreen() {
             placeholder="비밀번호"
             secureTextEntry
           />
-
           <TouchableOpacity style={[S.btn, S.primary]} onPress={onLogin} disabled={loading}>
             <Text style={S.btnTextWhite}>{loading ? '로그인 중...' : '로그인'}</Text>
           </TouchableOpacity>
-
-          {/* 개발/Test용 스킵 버튼 */}
-          <TouchableOpacity style={[S.btn, S.ghost]} onPress={() => router.replace('/home')}>
-            <Text style={S.btnTextDark}>로그인 건너뛰기 (테스트용)</Text>
-          </TouchableOpacity>
         </View>
 
-        {/* 하단 링크 */}
         <View style={S.links}>
           <TouchableOpacity onPress={() => router.push('/signup')}>
             <Text style={S.link}>회원가입</Text>
@@ -110,42 +138,16 @@ export default function LoginScreen() {
 }
 
 const S = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff', paddingTop:20, },
-  wrap: {
-    flex: 1,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-  },
+  safe: { flex: 1, backgroundColor: '#fff', paddingTop: 20 },
+  wrap: { flex: 1, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center', gap: 16 },
   header: { alignItems: 'center', gap: 8 },
   logo: { width: 200, height: 200, marginBottom: -40 },
-  title: { fontFamily: 'PretendardBold', fontSize: 28, textAlign: 'center' },
-  subtitle: {
-    fontFamily: 'PretendardMedium',
-    fontSize: 14,
-    color: '#6b7280',
-    textAlign: 'center',
-  },
+  title: { fontSize: 28, textAlign: 'center', fontWeight: '800' },
   form: { marginTop: 20, width: '100%', gap: 12 },
-  input: {
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 15,
-    backgroundColor: '#fff',
-  },
-  btn: {
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  input: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12, padding: 12, fontSize: 15, backgroundColor: '#fff' },
+  btn: { paddingVertical: 16, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   primary: { backgroundColor: '#111827' },
-  ghost: { backgroundColor: '#f3f4f6' },
-  btnTextWhite: { color: '#fff', fontFamily: 'PretendardBold' },
-  btnTextDark: { color: '#111827', fontFamily: 'PretendardBold' },
+  btnTextWhite: { color: '#fff', fontWeight: '800' },
   links: { flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 18 },
   link: { color: '#6b7280' },
 });

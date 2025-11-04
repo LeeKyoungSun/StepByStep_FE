@@ -29,7 +29,7 @@ export default function HomeScreen() {
     <View style={{ flex: 1 }}>
       {/* 배경 그라데이션 */}
       <LinearGradient
-        colors={['#9461cbff', '#cba4f8ff', '#fafafaff']}
+        colors={['#AF46CD', '#E2A9F1', '#fafafaff']}
         start={{ x: 0, y: 1 }}
         end={{ x: 0, y: 0 }}
         style={StyleSheet.absoluteFill}

@@ -1,11 +1,12 @@
-// app/keywordScenario.js
 import { router } from 'expo-router';
-import { Dimensions, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { quizApi } from '../lib/apiClient';
 
 const { width, height } = Dimensions.get('window');
 
-// 배치 좌표: 퍼센트로 지정 → 원래 예시 이미지처럼 배치
-const BUBBLES = [
+const FALLBACK = [
   { label: '피임', size: 290, color: '#eadff6ff', x: 60, y: 50 },
   { label: '생리', size: 170, color: '#cc85f5ff', x: 30, y: 22 },
   { label: '연애', size: 230, color: '#842fb9ff', x: 60, y: 87 },
@@ -14,31 +15,40 @@ const BUBBLES = [
 ];
 
 export default function KeywordScenarioScreen() {
-  const onPressKeyword = (kw) => {
+  const [bubbles, setBubbles] = useState(FALLBACK);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { keywords = [] } = await quizApi.getKeywords(); // ← BE 호출
+        if (Array.isArray(keywords) && keywords.length) {
+          const mapped = keywords.slice(0, 5).map((k, i) => ({
+            ...FALLBACK[i % FALLBACK.length],
+            label: k,
+          }));
+          setBubbles(mapped);
+        }
+      } catch (e) {
+      
+      }
+    })();
+  }, []);
+
+  const onPressKeyword = (kw) =>
     router.push({ pathname: '/scenario', params: { keyword: kw, mode: 'keyword' } });
-  };
 
   return (
     <SafeAreaView style={S.safe}>
       <View style={S.container}>
-        {BUBBLES.map((b) => {
+        {bubbles.map((b) => {
           const left = (b.x / 100) * width - b.size / 2;
-          const top = (b.y / 100) * height - b.size / 2 - 100; // SafeArea 고려
+          const top = (b.y / 100) * height - b.size / 2 - 100;
           return (
             <TouchableOpacity
               key={b.label}
               activeOpacity={0.85}
               onPress={() => onPressKeyword(b.label)}
-              style={[
-                S.bubble,
-                {
-                  width: b.size,
-                  height: b.size,
-                  backgroundColor: b.color,
-                  left,
-                  top,
-                },
-              ]}
+              style={[S.bubble, { width: b.size, height: b.size, backgroundColor: b.color, left, top }]}
             >
               <Text style={S.text}>{b.label}</Text>
             </TouchableOpacity>
@@ -63,10 +73,5 @@ const S = StyleSheet.create({
     shadowRadius: 8,
     elevation: 2,
   },
-  text: {
-    fontFamily: 'PretendardBold',
-    fontSize: 18,
-    color: '#111827',
-    textAlign: 'center',
-  },
+  text: { fontFamily: 'PretendardBold', fontSize: 18, color: '#111827', textAlign: 'center' },
 });
