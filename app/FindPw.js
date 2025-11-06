@@ -2,6 +2,7 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { authApi } from '../lib/apiClient';
 
 export default function ResetPasswordScreen() {
   const [email, setEmail] = useState('');
@@ -9,18 +10,12 @@ export default function ResetPasswordScreen() {
   const onSend = async () => {
     if (!email.trim()) return Alert.alert('비밀번호 재설정', '이메일을 입력하세요.');
     try {
-      // TODO: 실제 API로 변경: POST /api/auth/reset
-      const res = await fetch(`${process.env.EXPO_PUBLIC_API}/api/auth/reset`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      if (!res.ok) throw new Error('전송에 실패했습니다.');
-      Alert.alert('이메일 전송', '재설정 링크를 이메일로 보냈어요.', [
-        { text: '로그인으로', onPress: () => router.replace('/login') },
-      ]);
+        await authApi.resetPassword(email);
+        Alert.alert('이메일 전송', '재설정 링크를 이메일로 보냈어요.', [
+            { text: '로그인으로', onPress: () => router.replace('/login') },
+        ]);
     } catch (e) {
-      Alert.alert('오류', e.message);
+        Alert.alert('오류', e.message);
     }
   };
 
