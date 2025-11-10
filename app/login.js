@@ -20,8 +20,7 @@ export default function LoginScreen() {
   const [pw, setPw] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // ✅ useAuth가 없더라도 절대 크래시하지 않도록 가드
-  const authCtx = (typeof useAuth === 'function' ? useAuth() : null);
+  const authCtx = useAuth();
   const setTokens = authCtx?.setTokens ?? (async () => {});
 
   const onLogin = async () => {
@@ -126,7 +125,7 @@ export default function LoginScreen() {
             <Text style={S.link}>회원가입</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => router.push('/findEmail')}>
-            <Text style={S.link}>아이디 찾기</Text>
+            <Text style={S.link}>이메일 찾기</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => router.push('/FindPw')}>
             <Text style={S.link}>비밀번호 찾기</Text>
