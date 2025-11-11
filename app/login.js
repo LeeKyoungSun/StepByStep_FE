@@ -83,9 +83,40 @@ export default function LoginScreen() {
         refreshTokenExpiresAt,
       });
 
+      const tempPwFlags = [
+        res?.isTemporaryPassword,
+        res?.temporaryPassword,
+        res?.data?.isTemporaryPassword,
+        res?.data?.temporaryPassword,
+        res?.user?.isTemporaryPassword,
+        res?.user?.temporaryPassword,
+        res?.profile?.isTemporaryPassword,
+        res?.profile?.temporaryPassword,
+      ];
+
+      const forceProfileFlags = [
+        res?.requiresProfileUpdate,
+        res?.data?.requiresProfileUpdate,
+        res?.user?.requiresProfileUpdate,
+        res?.profile?.requiresProfileUpdate,
+      ];
+
+      const shouldGoProfile = [...tempPwFlags, ...forceProfileFlags].some((v) => Boolean(v));
+
+      if (shouldGoProfile) {
+        router.replace('/api/users/me');
+        setTimeout(() => {
+          Alert.alert(
+              '비밀번호 변경 필요',
+              '임시 비밀번호로 로그인하셨어요. 개인정보 수정 페이지로 이동합니다.'
+          );
+        }, 100);
+        return;
+      }
+
       router.replace('/home');
     } catch (err) {
-      Alert.alert('로그인 실패', err?.message || '로그인에 실패했습니다.');
+      Alert.alert('로그인 실패', err?.message || '로그인에 실패했습니다. 이메일과 비밀번호를 다시 입력해주세요.');
     } finally {
       setLoading(false);
     }

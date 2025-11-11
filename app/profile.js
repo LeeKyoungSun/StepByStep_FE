@@ -1,4 +1,5 @@
 // app/profile.js
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
@@ -13,10 +14,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useAuth } from '../lib/auth-context';
+import {authApi, fetchJSON, userApi} from '../lib/apiClient.js';
 
 export default function ProfileEditScreen() {
   const [nickname, setNickname] = useState('');
-  const [gender, setGender] = useState('female'); 
+  const [gender, setGender] = useState('female');
   const [birthYear, setBirthYear] = useState('');
 
   // 비밀번호(선택)
@@ -26,18 +29,19 @@ export default function ProfileEditScreen() {
 
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const auth = useAuth();
 
   // 내 정보 불러오기(선택)
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${process.env.EXPO_PUBLIC_API}/api/users/me`);
-        if (!res.ok) return;
-        const data = await res.json();
+        const data = await userApi.me();
         setNickname(data.nickname ?? '');
         setGender(data.gender ?? 'other');
         setBirthYear(data.birthYear ? String(data.birthYear) : '');
-      } catch {}
+      } catch (err) {
+        console.warn('Failed to load profile', err);
+      }
     })();
   }, []);
 
@@ -79,31 +83,18 @@ export default function ProfileEditScreen() {
     setLoading(true);
     try {
       // 1) 프로필 저장
-      const res1 = await fetch(`${process.env.EXPO_PUBLIC_API}/api/users/me`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nickname: nickname.trim(),
-          gender,
-          birthYear: Number(birthYear),
-        }),
+      await userApi.update({
+        nickname: nickname.trim(),
+        gender,
+        birthYear: Number(birthYear),
       });
-      if (!res1.ok) {
-        const e = await res1.json().catch(() => ({}));
-        throw new Error(e.message || '프로필 저장에 실패했습니다.');
-      }
 
       // 2) 비밀번호 변경(선택)
       if (hasPwChange()) {
-        const res2 = await fetch(`${process.env.EXPO_PUBLIC_API}/api/auth/change-password`, {
+        await fetchJSON('/api/users/me/change-password', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ currentPassword: currentPw, newPassword: newPw }),
+          body: { currentPassword: currentPw, newPassword: newPw },
         });
-        if (!res2.ok) {
-          const e = await res2.json().catch(() => ({}));
-          throw new Error(e.message || '비밀번호 변경에 실패했습니다.');
-        }
       }
 
       Alert.alert('완료', hasPwChange() ? '프로필/비밀번호가 저장되었습니다.' : '프로필이 저장되었습니다.', [
@@ -118,12 +109,12 @@ export default function ProfileEditScreen() {
 
   const onConfirmDelete = () => {
     Alert.alert(
-      '회원 탈퇴',
-      '정말 탈퇴하시겠어요? 모든 데이터가 삭제될 수 있습니다.',
-      [
-        { text: '취소', style: 'cancel' },
-        { text: '탈퇴', style: 'destructive', onPress: onDeleteAccount },
-      ]
+        '회원 탈퇴',
+        '정말 탈퇴하시겠어요? 모든 데이터가 삭제될 수 있습니다.',
+        [
+          { text: '취소', style: 'cancel' },
+          { text: '탈퇴', style: 'destructive', onPress: onDeleteAccount },
+        ]
     );
   };
 
@@ -131,21 +122,13 @@ export default function ProfileEditScreen() {
     setDeleting(true);
     try {
       // 실제 백엔드에 맞춰 엔드포인트 조정
-      const res = await fetch(`${process.env.EXPO_PUBLIC_API}/api/users/me`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error(e.message || '회원 탈퇴에 실패했습니다.');
-      }
+      await userApi.remove();
 
       Alert.alert('탈퇴 완료', '그동안 이용해 주셔서 감사합니다.', [
         {
           text: '확인',
           onPress: () => {
-            // TODO: 토큰/세션을 저장했다면 여기서 정리(AsyncStorage/SecureStore 등)
-            // 예) await AsyncStorage.removeItem('accessToken');
+            auth?.logout?.();
             router.replace('/login');
           },
         },
