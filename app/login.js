@@ -20,8 +20,7 @@ export default function LoginScreen() {
   const [pw, setPw] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // ✅ useAuth가 없더라도 절대 크래시하지 않도록 가드
-  const authCtx = (typeof useAuth === 'function' ? useAuth() : null);
+  const authCtx = useAuth();
   const setTokens = authCtx?.setTokens ?? (async () => {});
 
   const onLogin = async () => {
@@ -84,9 +83,40 @@ export default function LoginScreen() {
         refreshTokenExpiresAt,
       });
 
+      const tempPwFlags = [
+        res?.isTemporaryPassword,
+        res?.temporaryPassword,
+        res?.data?.isTemporaryPassword,
+        res?.data?.temporaryPassword,
+        res?.user?.isTemporaryPassword,
+        res?.user?.temporaryPassword,
+        res?.profile?.isTemporaryPassword,
+        res?.profile?.temporaryPassword,
+      ];
+
+      const forceProfileFlags = [
+        res?.requiresProfileUpdate,
+        res?.data?.requiresProfileUpdate,
+        res?.user?.requiresProfileUpdate,
+        res?.profile?.requiresProfileUpdate,
+      ];
+
+      const shouldGoProfile = [...tempPwFlags, ...forceProfileFlags].some((v) => Boolean(v));
+
+      if (shouldGoProfile) {
+        router.replace('/api/users/me/change-password');
+        setTimeout(() => {
+          Alert.alert(
+              '비밀번호 변경 필요',
+              '임시 비밀번호로 로그인하셨어요. 비밀번호 변경 페이지로 이동합니다.'
+          );
+        }, 100);
+        return;
+      }
+
       router.replace('/home');
     } catch (err) {
-      Alert.alert('로그인 실패', err?.message || '로그인에 실패했습니다.');
+      Alert.alert('로그인 실패', err?.message || '로그인에 실패했습니다. 이메일과 비밀번호를 다시 입력해주세요.');
     } finally {
       setLoading(false);
     }
@@ -126,7 +156,7 @@ export default function LoginScreen() {
             <Text style={S.link}>회원가입</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => router.push('/findEmail')}>
-            <Text style={S.link}>아이디 찾기</Text>
+            <Text style={S.link}>이메일 찾기</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => router.push('/FindPw')}>
             <Text style={S.link}>비밀번호 찾기</Text>

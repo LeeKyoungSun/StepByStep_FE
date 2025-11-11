@@ -13,10 +13,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useAuth } from '../lib/auth-context';
+import { authApi, userApi } from '../lib/apiClient';
 
 export default function ProfileEditScreen() {
   const [nickname, setNickname] = useState('');
-  const [gender, setGender] = useState('female'); 
+  const [gender, setGender] = useState('female');
   const [birthYear, setBirthYear] = useState('');
 
   // 비밀번호(선택)
@@ -26,20 +28,35 @@ export default function ProfileEditScreen() {
 
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const { setTokens, logout } = useAuth();
+
+  const normalizeGender = (value) => {
+    if (!value) return 'other';
+    const lower = String(value).toLowerCase();
+    if (lower === 'male' || lower === 'm') return 'male';
+    if (lower === 'female' || lower === 'f') return 'female';
+    return 'other';
+  };
+
+  const serializeGender = (value) => {
+    if (value === 'male') return 'M';
+    if (value === 'female') return 'F';
+    return value;
+  };
 
   // 내 정보 불러오기(선택)
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${process.env.EXPO_PUBLIC_API}/api/users/me`);
-        if (!res.ok) return;
-        const data = await res.json();
-        setNickname(data.nickname ?? '');
-        setGender(data.gender ?? 'other');
-        setBirthYear(data.birthYear ? String(data.birthYear) : '');
+        const me = await userApi.me();
+        if (!me) return;
+        setNickname(me.nickname ?? '');
+        setGender(normalizeGender(me.gender));
+        setBirthYear(me.birthYear ? String(me.birthYear) : '');
+        await setTokens({ user: me });
       } catch {}
     })();
-  }, []);
+  }, [setTokens]);
 
   const validateProfile = () => {
     if (!nickname.trim()) {
@@ -54,18 +71,30 @@ export default function ProfileEditScreen() {
     return true;
   };
 
-  const hasPwChange = () => currentPw || newPw || newPw2;
+  const hasPwChange = () => Boolean(currentPw || newPw || newPw2);
 
   const validatePassword = () => {
-    if (!currentPw || !newPw || !newPw2) {
-      Alert.alert('입력 오류', '비밀번호 변경을 원하시면 3칸을 모두 입력하세요.');
+    const trimmedCurrent = currentPw.trim();
+    const trimmedNew = newPw.trim();
+    const trimmedConfirm = newPw2.trim();
+
+    if (!trimmedCurrent) {
+      Alert.alert('입력 오류', '현재 비밀번호를 입력하세요.');
       return false;
     }
-    if (newPw.length < 8) {
+    if (!trimmedNew || !trimmedConfirm) {
+      Alert.alert('입력 오류', '새 비밀번호와 확인을 입력하세요.');
+      return false;
+    }
+    if (trimmedNew.length < 8) {
       Alert.alert('입력 오류', '새 비밀번호는 8자 이상이어야 합니다.');
       return false;
     }
-    if (newPw !== newPw2) {
+    if (trimmedCurrent === trimmedNew) {
+      Alert.alert('입력 오류', '새 비밀번호는 현재 비밀번호와 달라야 합니다.');
+      return false;
+    }
+    if (trimmedNew !== trimmedConfirm) {
       Alert.alert('입력 오류', '새 비밀번호와 확인이 일치하지 않습니다.');
       return false;
     }
@@ -73,40 +102,41 @@ export default function ProfileEditScreen() {
   };
 
   const onSaveAll = async () => {
+    const wantsPwChange = hasPwChange();
     if (!validateProfile()) return;
-    if (hasPwChange() && !validatePassword()) return;
+    if (wantsPwChange && !validatePassword()) return;
 
     setLoading(true);
     try {
       // 1) 프로필 저장
-      const res1 = await fetch(`${process.env.EXPO_PUBLIC_API}/api/users/me`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nickname: nickname.trim(),
-          gender,
-          birthYear: Number(birthYear),
-        }),
+      const updated = await userApi.update({
+        nickname: nickname.trim(),
+        gender: serializeGender(gender),
+        birthYear: Number(birthYear),
       });
-      if (!res1.ok) {
-        const e = await res1.json().catch(() => ({}));
-        throw new Error(e.message || '프로필 저장에 실패했습니다.');
+      if (updated) {
+        setNickname(updated.nickname ?? nickname.trim());
+        setGender(normalizeGender(updated.gender));
+        setBirthYear(updated.birthYear ? String(updated.birthYear) : String(birthYear));
+        await setTokens({ user: updated });
       }
 
       // 2) 비밀번호 변경(선택)
-      if (hasPwChange()) {
-        const res2 = await fetch(`${process.env.EXPO_PUBLIC_API}/api/auth/change-password`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ currentPassword: currentPw, newPassword: newPw }),
+      if (wantsPwChange) {
+        const trimmedCurrent = currentPw.trim();
+        const trimmedNew = newPw.trim();
+        const trimmedConfirm = newPw2.trim();
+        await authApi.changePassword({
+          ...(trimmedCurrent ? { currentPassword: trimmedCurrent } : {}),
+          newPassword: trimmedNew,
+          newPasswordConfirm: trimmedConfirm,
         });
-        if (!res2.ok) {
-          const e = await res2.json().catch(() => ({}));
-          throw new Error(e.message || '비밀번호 변경에 실패했습니다.');
-        }
+        setCurrentPw('');
+        setNewPw('');
+        setNewPw2('');
       }
 
-      Alert.alert('완료', hasPwChange() ? '프로필/비밀번호가 저장되었습니다.' : '프로필이 저장되었습니다.', [
+      Alert.alert('완료', wantsPwChange ? '프로필/비밀번호가 저장되었습니다.' : '프로필이 저장되었습니다.', [
         { text: '확인', onPress: () => router.back() },
       ]);
     } catch (e) {
@@ -118,12 +148,12 @@ export default function ProfileEditScreen() {
 
   const onConfirmDelete = () => {
     Alert.alert(
-      '회원 탈퇴',
-      '정말 탈퇴하시겠어요? 모든 데이터가 삭제될 수 있습니다.',
-      [
-        { text: '취소', style: 'cancel' },
-        { text: '탈퇴', style: 'destructive', onPress: onDeleteAccount },
-      ]
+        '회원 탈퇴',
+        '정말 탈퇴하시겠어요? 모든 데이터가 삭제될 수 있습니다.',
+        [
+          { text: '취소', style: 'cancel' },
+          { text: '탈퇴', style: 'destructive', onPress: onDeleteAccount },
+        ]
     );
   };
 
@@ -131,22 +161,17 @@ export default function ProfileEditScreen() {
     setDeleting(true);
     try {
       // 실제 백엔드에 맞춰 엔드포인트 조정
-      const res = await fetch(`${process.env.EXPO_PUBLIC_API}/api/users/me`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error(e.message || '회원 탈퇴에 실패했습니다.');
-      }
+      await userApi.remove();
 
       Alert.alert('탈퇴 완료', '그동안 이용해 주셔서 감사합니다.', [
         {
           text: '확인',
           onPress: () => {
-            // TODO: 토큰/세션을 저장했다면 여기서 정리(AsyncStorage/SecureStore 등)
-            // 예) await AsyncStorage.removeItem('accessToken');
-            router.replace('/login');
+            logout()
+                .catch(() => {})
+                .finally(() => {
+                  router.replace('/login');
+                });
           },
         },
       ]);
@@ -200,7 +225,7 @@ export default function ProfileEditScreen() {
           <Text style={S.label}>태어난 연도</Text>
           <TextInput
             style={S.input}
-            placeholder="예: 2002"
+            placeholder="예: 2010"
             value={birthYear}
             onChangeText={(t) => setBirthYear(t.replace(/[^0-9]/g, ''))}
             keyboardType="number-pad"
