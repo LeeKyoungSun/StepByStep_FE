@@ -1,4 +1,5 @@
 // app/home.js
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -12,7 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { badgeApi, pointsApi, userApi } from '../lib/apiClient';
+import { badgeApi, pointsApi, userApi, authApi } from '../lib/apiClient';
 import { useAuth } from '../lib/auth-context';
 
 const normalizeBadges = (list) => {
@@ -123,6 +124,42 @@ export default function HomeScreen() {
       }, [loadSummary])
   );
 
+  const [logoutLoading, setLogoutLoading] = useState(false);
+
+  const authCtx = useAuth();
+  const performLogout = authCtx?.logout ?? (async () => {
+    await AsyncStorage.multiRemove([
+      'accessToken',
+      'refreshToken',
+      'accessTokenExpiresAt',
+      'refreshTokenExpiresAt',
+      'user',
+    ]);
+  });
+
+  const onPressLogout = async () => {
+    if (logoutLoading) return;
+
+    try {
+      setLogoutLoading(true);
+      const [accessToken, refreshToken] = await Promise.all([
+        AsyncStorage.getItem('accessToken'),
+        AsyncStorage.getItem('refreshToken'),
+      ]);
+
+      if (authApi && typeof authApi.logout === 'function') {
+        await authApi.logout({ accessToken, refreshToken });
+      }
+
+      await performLogout();
+      router.replace('/login');
+    } catch (err) {
+      Alert.alert('로그아웃 실패', err?.message || '로그아웃에 실패했습니다.');
+    } finally {
+      setLogoutLoading(false);
+    }
+  };
+
   return (
       <View style={{ flex: 1 }}>
         {/* 배경 그라데이션 */}
@@ -138,13 +175,26 @@ export default function HomeScreen() {
           <View style={styles.headerRow}>
             <View style={styles.headerInfo}>
               {/* 카드 내부 우측 상단 버튼 */}
-              <TouchableOpacity
-                  onPress={() => router.push('/profile')}
-                  style={styles.profileBtnInside}
-                  activeOpacity={0.85}
-              >
-                <Text style={styles.profileSmallText}>개인정보 수정</Text>
-              </TouchableOpacity>
+              <View style={styles.profileBtnRow}>
+                <TouchableOpacity
+                    onPress={onPressLogout}
+                    style={[styles.profileBtnInside, logoutLoading ? styles.profileBtnDisabled : null]}
+                    activeOpacity={0.85}
+                    disabled={logoutLoading}
+                >
+                  <Text style={styles.profileSmallText}>
+                    {logoutLoading ? '로그아웃 중...' : '로그아웃'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    onPress={() => router.push('/profile')}
+                    style={styles.profileBtnInside}
+                    activeOpacity={0.85}
+                >
+                  <Text style={styles.profileSmallText}>개인정보 수정</Text>
+                </TouchableOpacity>
+              </View>
 
               {/* 프로필 요약 */}
               <View style={styles.headerTop}>
@@ -250,10 +300,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
-  profileBtnInside: {
+  profileBtnRow: {
     position: 'absolute',
     right: 10,
     top: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  profileBtnInside: {
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 10,
@@ -261,6 +316,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
+  profileBtnDisabled: { opacity: 0.6 },
   profileSmallText: { fontSize: 12, color: '#374151', fontFamily: 'PretendardMedium' },
 
   headerTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
