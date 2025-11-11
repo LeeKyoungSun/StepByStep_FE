@@ -1,5 +1,4 @@
 // app/profile.js
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
@@ -44,7 +43,6 @@ export default function ProfileEditScreen() {
     if (value === 'female') return 'F';
     return value;
   };
-  const auth = useAuth();
 
   // 내 정보 불러오기(선택)
   useEffect(() => {
@@ -76,15 +74,27 @@ export default function ProfileEditScreen() {
   const hasPwChange = () => Boolean(currentPw || newPw || newPw2);
 
   const validatePassword = () => {
-    if (!newPw || !newPw2) {
+    const trimmedCurrent = currentPw.trim();
+    const trimmedNew = newPw.trim();
+    const trimmedConfirm = newPw2.trim();
+
+    if (!trimmedCurrent) {
+      Alert.alert('입력 오류', '현재 비밀번호를 입력하세요.');
+      return false;
+    }
+    if (!trimmedNew || !trimmedConfirm) {
       Alert.alert('입력 오류', '새 비밀번호와 확인을 입력하세요.');
       return false;
     }
-    if (newPw.length < 8) {
+    if (trimmedNew.length < 8) {
       Alert.alert('입력 오류', '새 비밀번호는 8자 이상이어야 합니다.');
       return false;
     }
-    if (newPw !== newPw2) {
+    if (trimmedCurrent === trimmedNew) {
+      Alert.alert('입력 오류', '새 비밀번호는 현재 비밀번호와 달라야 합니다.');
+      return false;
+    }
+    if (trimmedNew !== trimmedConfirm) {
       Alert.alert('입력 오류', '새 비밀번호와 확인이 일치하지 않습니다.');
       return false;
     }
@@ -113,10 +123,13 @@ export default function ProfileEditScreen() {
 
       // 2) 비밀번호 변경(선택)
       if (wantsPwChange) {
+        const trimmedCurrent = currentPw.trim();
+        const trimmedNew = newPw.trim();
+        const trimmedConfirm = newPw2.trim();
         await authApi.changePassword({
-          ...(currentPw ? { currentPassword: currentPw } : {}),
-          newPassword: newPw,
-          newPasswordConfirm: newPw2,
+          ...(trimmedCurrent ? { currentPassword: trimmedCurrent } : {}),
+          newPassword: trimmedNew,
+          newPasswordConfirm: trimmedConfirm,
         });
         setCurrentPw('');
         setNewPw('');
@@ -212,7 +225,7 @@ export default function ProfileEditScreen() {
           <Text style={S.label}>태어난 연도</Text>
           <TextInput
             style={S.input}
-            placeholder="예: 2002"
+            placeholder="예: 2010"
             value={birthYear}
             onChangeText={(t) => setBirthYear(t.replace(/[^0-9]/g, ''))}
             keyboardType="number-pad"

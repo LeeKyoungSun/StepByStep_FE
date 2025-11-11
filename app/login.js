@@ -104,11 +104,11 @@ export default function LoginScreen() {
       const shouldGoProfile = [...tempPwFlags, ...forceProfileFlags].some((v) => Boolean(v));
 
       if (shouldGoProfile) {
-        router.replace('/api/users/me');
+        router.replace('/api/users/me/change-password');
         setTimeout(() => {
           Alert.alert(
               '비밀번호 변경 필요',
-              '임시 비밀번호로 로그인하셨어요. 개인정보 수정 페이지로 이동합니다.'
+              '임시 비밀번호로 로그인하셨어요. 비밀번호 변경 페이지로 이동합니다.'
           );
         }, 100);
         return;
